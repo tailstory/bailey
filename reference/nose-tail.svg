@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 810.58 920.25">
+  <title>H4 · nose over tail (reference only)</title>
+  <use href="../parts/nose.svg#art" x="199.7" y="0" width="413.97" height="329.75"/>
+  <use href="../parts/tail.svg#art" x="0" y="421.39" width="810.58" height="498.86"/>
+</svg>

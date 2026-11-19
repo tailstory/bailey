@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 914.2 1451.97">
+  <title>G4 ★ · built in: Bailey is the T, paws on the crossbar</title>
+  <!-- The paw pads are cut out of what Bailey leans on, so the paws stay open. -->
+  <mask id="paws" maskUnits="userSpaceOnUse" x="-64" y="-64" width="1042.2" height="1579.97">
+    <rect x="-64" y="-64" width="1042.2" height="1579.97" fill="#fff"/>
+    <use href="../parts/peek.svg#pads" x="23.24" y="0" width="810.56" height="439.74" color="#000"/>
+  </mask>
+  <g mask="url(#paws)">
+    <use href="../type/upper-t.svg#art" x="0" y="369.18" width="914.2" height="1082.79"/>
+  </g>
+  <use href="../parts/peek.svg#art" x="23.24" y="0" width="810.56" height="439.74"/>
+</svg>

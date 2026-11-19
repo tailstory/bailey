@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1190.69 745">
+  <title>G1 · TS: the tail turned upright as the S</title>
+  <use href="../type/upper-t.svg#art" x="0" y="0" width="629" height="745"/>
+  <use href="../parts/tail.svg#art" width="652.33" height="401.47" transform="translate(789.22 656.57) rotate(-90)"/>
+</svg>

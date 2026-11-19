@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1024 1024">
+  <title>App tile · t flick</title>
+  <rect class="ground" width="1024" height="1024" rx="224" fill="#FFFFFF"/>
+  <use href="../marks/t-flick.svg#art" x="130.66" y="288.38" width="560.23" height="371.88"/>
+</svg>
