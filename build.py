@@ -9,6 +9,7 @@ import math
 import re
 import tomllib
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from enum import StrEnum, auto
 from functools import cache, cached_property, reduce
 from itertools import batched, groupby, product
@@ -30,6 +31,8 @@ NOT_DRAWN = frozenset({"title", "desc", "defs", "mask", "symbol", "style", "meta
 BLACK = frozenset({"#000", "#000000", "black"})
 
 type Layer = tuple[str, pathops.Path]
+type Point = tuple[float, float]
+type Points = tuple[Point, ...]
 type Theme = dict[str, str]
 
 
@@ -223,38 +226,76 @@ def xml(template: Template) -> str:
     return "".join(out)
 
 
-def path_d(outline: pathops.Path, places: int) -> str:
-    def points(*pairs: tuple[float, float]) -> str:
-        return " ".join(num(c, places) for pair in pairs for c in pair)
+def rejoin(start: Point, first: Points, second: Points, slack: float = 0.01) -> Points | None:
+    """The cubic that two cubics are the halves of, if they are."""
+    a0, a1, a2, a3, b1, b2, b3 = (complex(*point) for point in (start, *first, *second))
+    if not (span := abs(b1 - a2)) or not 0.02 < (t := abs(a3 - a2) / span) < 0.98:
+        return None
+    p1, p2 = a0 + (a1 - a0) / t, b3 + (b2 - b3) / (1 - t)
+    middle = p1 + (p2 - p1) * t
+    r0, r1 = a1 + (middle - a1) * t, middle + (b2 - middle) * t
+    if max(abs(r0 - a2), abs(r1 - b1), abs(r0 + (r1 - r0) * t - a3)) > slack:
+        return None
+    return (p1.real, p1.imag), (p2.real, p2.imag), second[-1]
 
-    out = []
-    for verb, pairs in outline.segments:
+
+def segments(outline: pathops.Path) -> list[tuple[str, Points]]:
+    """The outline, with the cubics that pathops cut in two put back together."""
+    out, start, at = [], None, None
+    for verb, points in outline.segments:
+        if verb == "curveTo" and out and out[-1][0] == verb and (whole := rejoin(start, out[-1][1], points)):
+            out[-1] = (verb, whole)
+        else:
+            start = at
+            out.append((verb, points))
+        at = points[-1] if points else at
+    return out
+
+
+def commands(outline: pathops.Path, places: int) -> Iterator[str]:
+    def points(*pairs: Point) -> str:
+        return " ".join(f"{num(x, places)},{num(y, places)}" for x, y in pairs)
+
+    for verb, pairs in segments(outline):
         match verb:
             case "moveTo":
-                out.append(f"M{points(*pairs)}")
+                yield f"M{points(*pairs)}"
             case "lineTo":
-                out.append(f"L{points(*pairs)}")
+                yield f"L{points(*pairs)}"
             case "curveTo":
-                out.append(f"C{points(*pairs)}")
+                yield f"C{points(*pairs)}"
             case "qCurveTo":
-                out += [f"Q{points(*quad)}" for quad in decomposeQuadraticSegment(pairs)]
+                yield from (f"Q{points(*quad)}" for quad in decomposeQuadraticSegment(pairs))
             case "closePath" | "endPath":
-                out.append("Z")
-    return "".join(out)
+                yield "Z"
 
 
-def paths(art: Art, theme: Theme) -> str:
+def path_d(outline: pathops.Path, places: int, indent: str, width: int = 100) -> str:
+    """Each subpath starts a line and wraps between commands."""
+    lines = []
+    for command in commands(outline, places):
+        if command.startswith("M"):
+            lines.append(indent + command)
+        elif len(lines[-1]) + len(command) < width:
+            lines[-1] += f" {command}"
+        else:
+            lines.append(f"{indent}  {command}")
+    return "\n".join(["", *lines])
+
+
+def paths(art: Art, theme: Theme, indent: str = "  ") -> str:
     places = 2 if max(art.width, art.height) < 3000 else 1
-    return "".join(
-        xml(t'<path fill="{theme.get(fill, fill)}" d="{path_d(outline, places)}"/>') for fill, outline in art.layers
+    return "\n".join(
+        xml(t'{indent}<path fill="{theme.get(fill, fill)}" d="{path_d(outline, places, f"{indent}  ")}"/>')
+        for fill, outline in art.layers
     )
 
 
 def standalone(art: Art, theme: Theme) -> str:
     w, h = art.width, art.height
     return xml(
-        t'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
-        t"<title>{art.title}</title>{paths(art, theme):raw}</svg>\n"
+        t'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">\n'
+        t"  <title>{art.title}</title>\n{paths(art, theme):raw}\n</svg>\n"
     )
 
 
@@ -287,7 +328,10 @@ def sheet(folders: dict[str, str], arts: dict[str, list[Art]], themes: dict[str,
                 middle = (i + 0.5) * width
                 dx, dy = middle - art.width * s / 2, y + 30 + (height - 94 - art.height * s) / 2
                 out.append(
-                    xml(t'<g transform="translate({dx} {dy}) scale({num(s, 5)})">{paths(art, themes[name]):raw}</g>')
+                    xml(
+                        t'<g transform="translate({dx} {dy}) scale({num(s, 5)})">\n'
+                        t"{paths(art, themes[name], '    '):raw}\n  </g>"
+                    )
                 )
                 text(
                     middle,
@@ -298,9 +342,10 @@ def sheet(folders: dict[str, str], arts: dict[str, list[Art]], themes: dict[str,
                 )
                 text(middle, y + height - 16, " + ".join(art.links()) or "drawn here")
             y += height
+    body = "\n".join(f"  {element}" for element in out)
     return xml(
-        t'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {page} {y}" width="{page}" height="{y}">'
-        t'<rect width="{page}" height="{y}" fill="#F5F7FB"/>{"".join(out):raw}</svg>\n'
+        t'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {page} {y}" width="{page}" height="{y}">\n'
+        t'  <rect width="{page}" height="{y}" fill="#F5F7FB"/>\n{body:raw}\n</svg>\n'
     )
 
 
