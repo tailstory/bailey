@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1024 1024">
   <title>App tile · T wag</title>
   <rect class="ground" width="1024" height="1024" rx="224" fill="#FFFFFF"/>
-  <use href="../marks/t-wag.svg#art" x="105.56" y="268.22" width="662.81" height="395.78"/>
+  <use href="../marks/t-wag.svg#art" x="105" y="268" width="663" height="396"/>
 </svg>

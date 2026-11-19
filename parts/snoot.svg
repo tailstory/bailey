@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 496.5 418.2">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 497 419" fill="currentColor">
   <title>H · snoot (reference only)</title>
-  <path fill="currentColor" d="
+  <path id="snoot" d="
     M337.8,150.6 C338.9,162.5 316.7,174.7 307.7,180.8 C297.6,187.7 293.8,187.9 283.5,192.5
       C274.8,196.4 260.1,204.5 255.8,213.1 C250.5,223.7 260.3,252.8 269.7,259.9
       C274.5,263.6 292.7,274.2 298.4,276.2 C309,279.7 315.3,288 329.3,292.3

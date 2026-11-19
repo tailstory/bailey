@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 724 1400">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 724 1400" fill="currentColor">
   <title>Type · Inter Tight ExtraBold t, outlined</title>
-  <path fill="currentColor" d="
+  <path id="t" d="
     M704,266 L704,529 L0,529 L0,266 Z
     M147,0 L502,0 L502,1032 C502,1092 530.3,1122 593,1122 C617,1122 653.7,1115.3 671,1110 L724,1368
       C644,1390.7 577.7,1400 511,1400 C273.7,1400 147,1284 147,1072 Z"/>

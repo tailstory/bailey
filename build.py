@@ -129,22 +129,22 @@ class Art:
         keys = (self.follow(use.get("href"))[0].key for use in self.root.iter(f"{SVG}use"))
         return list(dict.fromkeys(key for key in keys if key != self.key))
 
-    def paint(self, el: ET.Element, ctm: Affine = IDENTITY, color: str = Role.INK) -> list[Layer]:
+    def paint(self, el: ET.Element, ctm: Affine = IDENTITY, color: str = Role.INK, fill: str = "#000") -> list[Layer]:
         tag = el.tag.removeprefix(SVG)
         if tag in NOT_DRAWN:
             return []
         ctm @= Affine.parse(el.get("transform"))
-        color = el.get("color", color)
+        color, fill = el.get("color", color), el.get("fill", fill)
         mask = el.get("mask")
         if mask and tag != "g":
             raise BuildError(f"{self.key}: put mask= on a <g> around the art, not on <{tag}>")
         match tag:
             case "g":
-                drawn = [*self.paint(child, ctm, color) for child in el]
+                drawn = [*self.paint(child, ctm, color, fill) for child in el]
                 if mask:
                     if (shape := self.ids.get(mask.removeprefix("url(#").removesuffix(")"))) is None:
                         raise BuildError(f"{self.key}: {mask} is not in this file")
-                    masked = [*self.paint(child, ctm) for child in shape]
+                    masked = [*self.paint(child, ctm, fill=fill) for child in shape]
                     hole = reduce(union, (cut for fill, cut in masked if fill.lower() in BLACK), pathops.Path())
                     drawn = [(fill, difference(outline, hole)) for fill, outline in drawn]
                 return drawn
@@ -152,14 +152,16 @@ class Art:
                 art, target = self.follow(el.get("href"))
                 ctm @= Affine(e=float(el.get("x", 0)), f=float(el.get("y", 0)))
                 if target.tag.removeprefix(SVG) not in ("svg", "symbol"):
-                    return art.paint(target, ctm, color)
+                    return art.paint(target, ctm, color, fill)
+                fill = target.get("fill", fill)
                 *_, vw, vh = view_box(target)
                 w, h = float(el.get("width", vw)), float(el.get("height", vh))
                 s = min(w / vw, h / vh)
                 ctm @= Affine(a=s, d=s, e=(w - vw * s) / 2, f=(h - vh * s) / 2)
-                return [*art.paint(child, ctm, color) for child in target]
+                return [*art.paint(child, ctm, color, fill) for child in target]
             case "path" | "rect":
-                fill = Role.GROUND if "ground" in el.get("class", "").split() else el.get("fill", "#000")
+                if "ground" in el.get("class", "").split():
+                    fill = Role.GROUND
                 outline = pathops.Path()
                 pen = TransformPen(outline.getPen(), ctm)
                 if tag == "path":
@@ -173,7 +175,7 @@ class Art:
     @cached_property
     def layers(self) -> list[Layer]:
         """One outline per run of the same fill, in paint order."""
-        drawn = [*self.paint(child) for child in self.root]
+        drawn = [*self.paint(child, fill=self.root.get("fill", "#000")) for child in self.root]
         return [(fill, reduce(union, (o for _, o in run))) for fill, run in groupby(drawn, lambda layer: layer[0])]
 
     @property

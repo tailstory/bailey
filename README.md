@@ -17,14 +17,14 @@ Tailstory's mascot, a border collie, as small SVG files that link to each other.
 Everything outside `parts/` and `type/` only places other files:
 
 ```xml
-<use href="../parts/tail.svg#art" x="312.35" y="149.13" width="935.29" height="575.61"/>
+<use href="../parts/tail.svg#art" x="312" y="149" width="935" height="576"/>
 ```
 
 Design apps and GitHub's preview do not follow these links, so those files look empty there. Chrome follows them when the repo is served (`python -m http.server`).
 
 ## Themes
 
-Art is `fill="currentColor"`. A tile's square is `class="ground"`. A theme in `bailey.toml` sets those two colours, and a new theme is a new table.
+A file that draws sets `fill="currentColor"` once, on its root. A tile's square is `class="ground"`. A theme in `bailey.toml` sets those two colours, and a new theme is a new table.
 
 ## Build
 
@@ -37,5 +37,7 @@ Rebuilds `dist/`: every file in every theme as a self-contained SVG, plus the PN
 ## Rules
 
 - One tail: `parts/tail.svg`. Never draw another.
+- Each island of ink is one `<path>` with an id. A hole stays in the path it cuts. Left and right are as seen.
+- View boxes and placements are whole numbers.
 - Cut one shape out of another with a `<mask>` on a `<g>` around the art, as in `marks/t-peek.svg`.
 - The letters are Inter Tight ExtraBold outlines (SIL Open Font License, `type/OFL.txt`).

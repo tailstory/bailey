@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 722.9 444.9">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 723 445" fill="currentColor">
   <title>D1 · the tail (the only tail: every tail in this repo is this drawing)</title>
-  <path fill="currentColor" d="
+  <path id="tail" d="
     M616.7,0 C625.8,5.4 646.5,38.4 652.5,48.6 L664.6,69.8 C669.9,71.6 672.5,38.1 679.5,49.9
       C701.5,86.9 713.8,127.6 714.5,170.6 C715.1,207.5 711.8,223.1 703.1,258.4
       C698.5,277.2 722.8,244.1 722.8,253.1 C722.8,264.9 699.3,298.5 690.9,307.9

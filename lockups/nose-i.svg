@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 2184.93 615.03">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 2185 615">
   <title>F5 · the nose print dots the i</title>
-  <use href="../type/wordmark-dotless.svg#art" x="0" y="78.38" width="2184.93" height="536.65"/>
-  <use href="../parts/nose.svg#art" x="598.31" y="0" width="125.67" height="100.1"/>
+  <use href="../type/wordmark-dotless.svg#art" x="0" y="78" width="2185" height="537"/>
+  <use href="../parts/nose.svg#art" x="598" y="0" width="126" height="101"/>
 </svg>

@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 238.4 189.9">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 239 190" fill="currentColor">
   <title>D2 · nose print (asset only)</title>
-  <path fill="currentColor" d="
+  <path id="nose" d="
     M208.1,150.1 C209,162 186.9,174.2 177.9,180.3 C160.4,192.1 151.3,189.2 130.8,189.3 L118.3,189.3
       C104.7,189.3 78,191.5 66.5,185.3 C60,181.8 40.8,166.8 35.6,161.4
       C26.1,151.6 31.7,143.6 43.4,141 C63.3,136.6 88.3,112.4 71,93.1 C60.7,81.4 34,88.5 43.2,107

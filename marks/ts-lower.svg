@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 837.27 700">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 837 700">
   <title>G8 · ts, lowercase pair</title>
   <use href="../type/lower-t.svg#art" x="0" y="0" width="362" height="700"/>
-  <use href="../parts/tail.svg#art" width="475.44" height="292.6" transform="translate(544.67 598.74) rotate(-90)"/>
+  <use href="../parts/tail.svg#art" width="475" height="293" transform="translate(544 598) rotate(-90)"/>
 </svg>

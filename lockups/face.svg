@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 2761.79 751.75">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 2761 752">
   <title>F1 · face left of the word (the default)</title>
-  <use href="../parts/face.svg#art" x="0" y="0" width="848.98" height="751.75"/>
-  <use href="../type/wordmark.svg#art" x="1062.4" y="189.71" width="1699.39" height="438.61"/>
+  <use href="../parts/face.svg#art" x="0" y="0" width="850" height="752"/>
+  <use href="../type/wordmark.svg#art" x="1062" y="190" width="1699" height="439"/>
 </svg>

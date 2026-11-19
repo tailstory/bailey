@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1258 1490">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1258 1490" fill="currentColor">
   <title>Type · Inter Tight ExtraBold T, outlined</title>
-  <path fill="currentColor" d="
+  <path id="T" d="
     M0,293 L0,0 L1258,0 L1258,293 L806,293 L806,1490 L452,1490 L452,293 Z"/>
 </svg>

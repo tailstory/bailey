@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1024 1024">
   <title>App tile · built-in T</title>
   <rect class="ground" width="1024" height="1024" rx="224" fill="#FFFFFF"/>
-  <use href="../marks/t-peek.svg#art" x="260" y="88.2" width="510.12" height="810.2"/>
+  <use href="../marks/t-peek.svg#art" x="260" y="88" width="511" height="810"/>
 </svg>

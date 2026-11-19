@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1247.64 745">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1247 745">
   <title>G2 · T, wagging</title>
   <use href="../type/upper-t.svg#art" x="0" y="0" width="629" height="745"/>
-  <use href="../parts/tail.svg#art" x="312.35" y="149.13" width="935.29" height="575.61"/>
+  <use href="../parts/tail.svg#art" x="312" y="149" width="935" height="576"/>
 </svg>

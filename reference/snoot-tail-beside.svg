@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1763.07 575.61">
+<svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 1763 576">
   <title>H2 · snoot beside tail (reference only)</title>
-  <use href="../parts/snoot.svg#art" x="0" y="10.74" width="658.99" height="555.07"/>
-  <use href="../parts/tail.svg#art" x="827.78" y="0" width="935.29" height="575.61"/>
+  <use href="../parts/snoot.svg#art" x="0" y="11" width="660" height="556"/>
+  <use href="../parts/tail.svg#art" x="828" y="0" width="935" height="576"/>
 </svg>
