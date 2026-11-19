@@ -1,4 +1,4 @@
-# Folders of source art, in the order the sheet shows them, each with a line on what it holds.
+# Source folders, in sheet order.
 [folders]
 parts = "the only drawn art"
 type = "Inter Tight ExtraBold, outlined"
@@ -7,8 +7,7 @@ tiles = "a square in the theme's ground colour, plus one mark"
 lockups = "a part beside the word"
 reference = "pairings kept for reference only"
 
-# A theme is a set of colours, nothing else. All art is one colour, "ink".
-# A tile also paints its square, "ground". Add a theme by adding a table here.
+# ink: the art. ground: a tile's square.
 [themes.light]
 ink = "#0B0E17"
 ground = "#FFFFFF"
@@ -17,7 +16,7 @@ ground = "#FFFFFF"
 ink = "#F3F5FA"
 ground = "#0B0E17"
 
-# PNG sizes in pixels (longest side), per folder. Folders not listed get SVG only.
+# PNG sizes per folder: longest side, in pixels.
 [png]
 marks = [1024]
 lockups = [1024]

@@ -1,174 +1,181 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.15"
 # dependencies = ["fonttools>=4.50", "skia-pathops>=0.8", "resvg-py>=0.5"]
 # ///
-"""Build Bailey's ready-to-use art into dist/.
-
-    uv run build.py
-
-Source files link to each other with <use href="../parts/tail.svg#art">. Browsers follow those links only
-over http, and GitHub's preview and design apps do not follow them at all, so this script follows them
-instead. Every source file becomes one self-contained SVG per theme (plain filled paths, nothing linked),
-PNGs at the sizes bailey.toml asks for, and a place on dist/sheet.svg.
-"""
-from __future__ import annotations
+"""Follow the links between the source files and write self-contained art into dist/."""
 
 import math
 import re
-import shutil
 import tomllib
 import xml.etree.ElementTree as ET
-from functools import cache
+from enum import StrEnum, auto
+from functools import cache, cached_property, reduce
+from itertools import batched, groupby, product
 from pathlib import Path
+from shutil import rmtree
+from string.templatelib import Interpolation, Template
+from typing import NamedTuple, Self
 from xml.sax.saxutils import escape
 
-import pathops
-import resvg_py
-from fontTools.pens.basePen import decomposeQuadraticSegment
-from fontTools.pens.transformPen import TransformPen
-from fontTools.svgLib.path import parse_path
+lazy import pathops
+lazy import resvg_py
+lazy from fontTools.pens.basePen import decomposeQuadraticSegment
+lazy from fontTools.pens.transformPen import TransformPen
+lazy from fontTools.svgLib.path import parse_path
 
 ROOT = Path(__file__).resolve().parent
 SVG = "{http://www.w3.org/2000/svg}"
-INK, GROUND = "ink", "ground"  # the colours a theme supplies
-NOT_DRAWN = {"title", "desc", "defs", "mask", "symbol", "style", "metadata"}
-BLACK = {"#000", "#000000", "black"}
+NOT_DRAWN = frozenset({"title", "desc", "defs", "mask", "symbol", "style", "metadata"})
+BLACK = frozenset({"#000", "#000000", "black"})
+
+type Layer = tuple[str, pathops.Path]
+type Theme = dict[str, str]
+
+
+class Role(StrEnum):
+    """The colours a theme supplies."""
+
+    INK = auto()
+    GROUND = auto()
 
 
 class BuildError(SystemExit):
-    """A source file is wrong in a way the person editing it can fix."""
+    """A source file needs fixing."""
 
 
-# ---- 2x3 affine matrices as (a, b, c, d, e, f): x' = a*x + c*y + e, y' = b*x + d*y + f ----
-IDENTITY = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+class Affine(NamedTuple):
+    """x' = a*x + c*y + e, y' = b*x + d*y + f."""
+
+    a: float = 1
+    b: float = 0
+    c: float = 0
+    d: float = 1
+    e: float = 0
+    f: float = 0
+
+    def __matmul__(self, o: Self) -> Self:
+        return Affine(
+            self.a * o.a + self.c * o.b,
+            self.b * o.a + self.d * o.b,
+            self.a * o.c + self.c * o.d,
+            self.b * o.c + self.d * o.d,
+            self.a * o.e + self.c * o.f + self.e,
+            self.b * o.e + self.d * o.f + self.f,
+        )
+
+    @classmethod
+    def parse(cls, transform: str | None) -> Self:
+        matrix = cls()
+        for name, args in re.findall(r"(\w+)\s*\(([^)]*)\)", transform or ""):
+            match name, [float(v) for v in re.split(r"[\s,]+", args.strip()) if v]:
+                case "translate", [x, *y]:
+                    matrix @= cls(e=x, f=y[0] if y else 0)
+                case "scale", [x, *y]:
+                    matrix @= cls(a=x, d=y[0] if y else x)
+                case "rotate", [degrees, *pivot]:
+                    r = math.radians(degrees)
+                    turn = cls(math.cos(r), math.sin(r), -math.sin(r), math.cos(r))
+                    if pivot:
+                        turn = cls(e=pivot[0], f=pivot[1]) @ turn @ cls(e=-pivot[0], f=-pivot[1])
+                    matrix @= turn
+                case "matrix", values:
+                    matrix @= cls(*values)
+                case _:
+                    raise BuildError(f"unsupported transform: {name}")
+        return matrix
 
 
-def mul(m, n):
-    a, b, c, d, e, f = m
-    g, h, i, j, k, l = n
-    return (a * g + c * h, b * g + d * h, a * i + c * j, b * i + d * j, a * k + c * l + e, b * k + d * l + f)
+IDENTITY = Affine()
 
 
-def parse_transform(text):
-    m = IDENTITY
-    for name, args in re.findall(r"(\w+)\s*\(([^)]*)\)", text or ""):
-        v = [float(x) for x in re.split(r"[\s,]+", args.strip()) if x]
-        if name == "translate":
-            t = (1, 0, 0, 1, v[0], v[1] if len(v) > 1 else 0)
-        elif name == "scale":
-            t = (v[0], 0, 0, v[1] if len(v) > 1 else v[0], 0, 0)
-        elif name == "rotate":
-            r = math.radians(v[0])
-            t = (math.cos(r), math.sin(r), -math.sin(r), math.cos(r), 0, 0)
-            if len(v) == 3:
-                t = mul(mul((1, 0, 0, 1, v[1], v[2]), t), (1, 0, 0, 1, -v[1], -v[2]))
-        elif name == "matrix":
-            t = tuple(v)
-        else:
-            raise BuildError(f"unsupported transform: {name}")
-        m = mul(m, t)
-    return m
+def union(one: pathops.Path, two: pathops.Path) -> pathops.Path:
+    return pathops.op(one, two, pathops.PathOp.UNION, fix_winding=True)
 
 
-def view_box(el):
-    return tuple(float(v) for v in el.get("viewBox").split())
+def difference(one: pathops.Path, two: pathops.Path) -> pathops.Path:
+    return pathops.op(one, two, pathops.PathOp.DIFFERENCE, fix_winding=True)
+
+
+def view_box(el: ET.Element) -> list[float]:
+    return [float(v) for v in el.get("viewBox").split()]
 
 
 class Art:
     """One source file."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path) -> None:
         self.path = path
-        self.key = path.relative_to(ROOT).with_suffix("").as_posix()  # "marks/t-peek"
+        self.key = path.relative_to(ROOT).with_suffix("").as_posix()
         self.root = ET.parse(path).getroot()
-        self.by_id = {el.get("id"): el for el in self.root.iter() if el.get("id")}
-        self.title = self.root.findtext(SVG + "title") or self.key
-        _, _, self.width, self.height = view_box(self.root)
+        self.ids = {el.get("id"): el for el in self.root.iter() if el.get("id")}
+        self.title = self.root.findtext(f"{SVG}title") or self.key
+        *_, self.width, self.height = view_box(self.root)
 
-    def follow(self, href: str) -> tuple[Art, ET.Element]:
-        """The file and element a link such as "../parts/tail.svg#art" points at."""
+    def follow(self, href: str) -> tuple[Self, ET.Element]:
         file, _, fragment = href.partition("#")
-        target = (self.path.parent / file).resolve() if file else self.path
-        if not target.is_file():
+        path = (self.path.parent / file).resolve() if file else self.path
+        if not path.is_file():
             raise BuildError(f"{self.key}: {href} points at a file that does not exist")
-        art = load(target)
-        element = art.by_id.get(fragment) if fragment else art.root
-        if element is None:
-            raise BuildError(f'{self.key}: {href} points at an id that {art.key} does not have')
-        return art, element
+        art = load(path)
+        if (target := art.ids.get(fragment) if fragment else art.root) is None:
+            raise BuildError(f"{self.key}: {href} points at an id that {art.key} does not have")
+        return art, target
 
     def links(self) -> list[str]:
-        """Other files this one places, in order, once each."""
-        found = []
-        for el in self.root.iter(SVG + "use"):
-            key = self.follow(el.get("href"))[0].key
-            if key != self.key and key not in found:
-                found.append(key)
-        return found
+        keys = (self.follow(use.get("href"))[0].key for use in self.root.iter(f"{SVG}use"))
+        return list(dict.fromkeys(key for key in keys if key != self.key))
 
-    def paint(self, el, ctm, color) -> list[tuple[str, pathops.Path]]:
-        """What one element draws: (fill, outline) pairs in paint order, every link followed."""
+    def paint(self, el: ET.Element, ctm: Affine = IDENTITY, color: str = Role.INK) -> list[Layer]:
         tag = el.tag.removeprefix(SVG)
         if tag in NOT_DRAWN:
             return []
-        ctm = mul(ctm, parse_transform(el.get("transform")))
+        ctm @= Affine.parse(el.get("transform"))
         color = el.get("color", color)
-        if el.get("mask") and tag != "g":
+        mask = el.get("mask")
+        if mask and tag != "g":
             raise BuildError(f"{self.key}: put mask= on a <g> around the art, not on <{tag}>")
-        if tag == "g":
-            drawn = [op for child in el for op in self.paint(child, ctm, color)]
-            if el.get("mask"):
-                mask = self.by_id.get(re.search(r"#([^)]+)", el.get("mask")).group(1))
-                if mask is None:
-                    raise BuildError(f'{self.key}: {el.get("mask")} is not in this file')
-                cut = self.knock_out(mask, ctm)
-                drawn = [(f, pathops.op(p, cut, pathops.PathOp.DIFFERENCE, fix_winding=True)) for f, p in drawn]
-            return drawn
-        if tag == "use":
-            art, target = self.follow(el.get("href"))
-            ctm = mul(ctm, (1, 0, 0, 1, float(el.get("x", 0)), float(el.get("y", 0))))
-            if target.tag not in (SVG + "svg", SVG + "symbol"):
-                return art.paint(target, ctm, color)
-            _, _, vw, vh = view_box(target)
-            w, h = float(el.get("width", vw)), float(el.get("height", vh))
-            s = min(w / vw, h / vh)  # fit the whole drawing inside the box, centred
-            ctm = mul(ctm, (s, 0, 0, s, (w - vw * s) / 2, (h - vh * s) / 2))
-            return [op for child in target for op in art.paint(child, ctm, color)]
-        fill = el.get("fill", "#000")
-        if "ground" in el.get("class", "").split():
-            fill = GROUND
-        elif fill == "currentColor":
-            fill = color
-        outline = pathops.Path()
-        pen = TransformPen(outline.getPen(), ctm)
-        if tag == "path":
-            parse_path(el.get("d"), pen)
-        elif tag == "rect":
-            round_rect(pen, *(float(el.get(k, 0)) for k in ("x", "y", "width", "height", "rx")))
-        else:
-            raise BuildError(f"{self.key}: <{tag}> is not supported; use <path>, <rect>, <use> or <g>")
-        return [(fill, pathops.simplify(outline, fix_winding=True))]
-
-    def knock_out(self, mask, ctm) -> pathops.Path:
-        """Everything a mask paints black: the area it removes."""
-        cut = pathops.Path()
-        for child in mask:
-            for fill, outline in self.paint(child, ctm, INK):
-                if fill.lower() in BLACK:
-                    cut = pathops.op(cut, outline, pathops.PathOp.UNION, fix_winding=True)
-        return cut
-
-    def flatten(self) -> list[tuple[str, pathops.Path]]:
-        """The whole file as one outline per run of the same fill, in paint order."""
-        layers: list[list] = []
-        for child in self.root:
-            for fill, outline in self.paint(child, IDENTITY, INK):
-                if layers and layers[-1][0] == fill:
-                    layers[-1][1] = pathops.op(layers[-1][1], outline, pathops.PathOp.UNION, fix_winding=True)
+        match tag:
+            case "g":
+                drawn = [*self.paint(child, ctm, color) for child in el]
+                if mask:
+                    if (shape := self.ids.get(mask.removeprefix("url(#").removesuffix(")"))) is None:
+                        raise BuildError(f"{self.key}: {mask} is not in this file")
+                    masked = [*self.paint(child, ctm) for child in shape]
+                    hole = reduce(union, (cut for fill, cut in masked if fill.lower() in BLACK), pathops.Path())
+                    drawn = [(fill, difference(outline, hole)) for fill, outline in drawn]
+                return drawn
+            case "use":
+                art, target = self.follow(el.get("href"))
+                ctm @= Affine(e=float(el.get("x", 0)), f=float(el.get("y", 0)))
+                if target.tag.removeprefix(SVG) not in ("svg", "symbol"):
+                    return art.paint(target, ctm, color)
+                *_, vw, vh = view_box(target)
+                w, h = float(el.get("width", vw)), float(el.get("height", vh))
+                s = min(w / vw, h / vh)
+                ctm @= Affine(a=s, d=s, e=(w - vw * s) / 2, f=(h - vh * s) / 2)
+                return [*art.paint(child, ctm, color) for child in target]
+            case "path" | "rect":
+                fill = Role.GROUND if "ground" in el.get("class", "").split() else el.get("fill", "#000")
+                outline = pathops.Path()
+                pen = TransformPen(outline.getPen(), ctm)
+                if tag == "path":
+                    parse_path(el.get("d"), pen)
                 else:
-                    layers.append([fill, outline])
-        return [(fill, outline) for fill, outline in layers]
+                    round_rect(pen, *(float(el.get(k, 0)) for k in ("x", "y", "width", "height", "rx")))
+                return [(color if fill == "currentColor" else fill, pathops.simplify(outline, fix_winding=True))]
+            case _:
+                raise BuildError(f"{self.key}: <{tag}> is not supported; use <path>, <rect>, <use> or <g>")
+
+    @cached_property
+    def layers(self) -> list[Layer]:
+        """One outline per run of the same fill, in paint order."""
+        drawn = [*self.paint(child) for child in self.root]
+        return [(fill, reduce(union, (o for _, o in run))) for fill, run in groupby(drawn, lambda layer: layer[0])]
+
+    @property
+    def has_ground(self) -> bool:
+        return any(fill == Role.GROUND for fill, _ in self.layers)
 
 
 @cache
@@ -176,7 +183,7 @@ def load(path: Path) -> Art:
     return Art(path)
 
 
-def round_rect(pen, x, y, w, h, r):
+def round_rect(pen: TransformPen, x: float, y: float, w: float, h: float, r: float) -> None:
     r = min(r, w / 2, h / 2)
     k = r * 0.5522847498
     pen.moveTo((x + r, y))
@@ -195,110 +202,126 @@ def round_rect(pen, x, y, w, h, r):
     pen.closePath()
 
 
-def num(v, places=2):
-    s = f"{v:.{places}f}".rstrip("0").rstrip(".")
-    return "0" if s in ("", "-0") else s
+def num(value: float, places: int = 2) -> str:
+    text = f"{value:.{places}f}".rstrip("0").rstrip(".")
+    return "0" if text in ("", "-0") else text
 
 
-def path_d(outline: pathops.Path, places) -> str:
+def xml(template: Template) -> str:
+    """Render a t-string as markup: values are escaped unless marked :raw."""
     out = []
-    for verb, pts in outline.segments:
-        if verb in ("moveTo", "lineTo"):
-            out.append(("M" if verb == "moveTo" else "L") + " ".join(num(c, places) for c in pts[0]))
-        elif verb == "curveTo":
-            out.append("C" + " ".join(num(c, places) for pt in pts for c in pt))
-        elif verb == "qCurveTo":  # pathops chains quadratics the way TrueType does: split them back up
-            for control, end in decomposeQuadraticSegment(pts):
-                out.append("Q" + " ".join(num(c, places) for c in (*control, *end)))
-        elif verb in ("closePath", "endPath"):
-            out.append("Z")
+    for part in template:
+        match part:
+            case str():
+                out.append(part)
+            case Interpolation(value=value, format_spec="raw"):
+                out.append(value)
+            case Interpolation(value=float() as value):
+                out.append(num(value))
+            case Interpolation(value=value):
+                out.append(escape(str(value), {'"': "&quot;"}))
     return "".join(out)
 
 
-def paths(art: Art, layers, theme) -> str:
+def path_d(outline: pathops.Path, places: int) -> str:
+    def points(*pairs: tuple[float, float]) -> str:
+        return " ".join(num(c, places) for pair in pairs for c in pair)
+
+    out = []
+    for verb, pairs in outline.segments:
+        match verb:
+            case "moveTo":
+                out.append(f"M{points(*pairs)}")
+            case "lineTo":
+                out.append(f"L{points(*pairs)}")
+            case "curveTo":
+                out.append(f"C{points(*pairs)}")
+            case "qCurveTo":
+                out += [f"Q{points(*quad)}" for quad in decomposeQuadraticSegment(pairs)]
+            case "closePath" | "endPath":
+                out.append("Z")
+    return "".join(out)
+
+
+def paths(art: Art, theme: Theme) -> str:
     places = 2 if max(art.width, art.height) < 3000 else 1
-    return "".join(f'<path fill="{theme.get(fill, fill)}" d="{path_d(outline, places)}"/>' for fill, outline in layers)
+    return "".join(
+        xml(t'<path fill="{theme.get(fill, fill)}" d="{path_d(outline, places)}"/>') for fill, outline in art.layers
+    )
 
 
-def standalone(art: Art, layers, theme) -> str:
-    w, h = num(art.width), num(art.height)
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
-            f"<title>{escape(art.title)}</title>{paths(art, layers, theme)}</svg>\n")
+def standalone(art: Art, theme: Theme) -> str:
+    w, h = art.width, art.height
+    return xml(
+        t'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}">'
+        t"<title>{art.title}</title>{paths(art, theme):raw}</svg>\n"
+    )
 
 
-def sheet(folders, arts, flat, themes) -> str:
-    """Everything on one page: each file once, and anything with a ground once per theme."""
-    page, row_art, paper, band, rule = 1400, 196, "#F5F7FB", "#E9ECF3", "#E3E7EF"
-    sans = "system-ui,-apple-system,'Segoe UI',Helvetica,Arial,sans-serif"
-    mono = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+def sheet(folders: dict[str, str], arts: dict[str, list[Art]], themes: dict[str, Theme]) -> str:
+    """Every file once; anything that paints a ground, once per theme."""
+    page, tallest, sans, mono = 1400, 196, "system-ui,sans-serif", "ui-monospace,monospace"
     first = next(iter(themes))
-    out, y = [], 0
+    out, y = [], 0.0
 
-    def text(x, ty, s, size, fill, weight=400, anchor="start", family=sans, spacing=""):
-        out.append(f'<text x="{num(x)}" y="{num(ty)}" font-family="{family}" font-size="{size}" font-weight="{weight}" '
-                   f'fill="{fill}" text-anchor="{anchor}"{spacing}>{escape(s)}</text>')
+    def text(x: float, y: float, s: str, *, anchor: str = "middle", weight: int = 400, family: str = sans) -> None:
+        out.append(
+            xml(
+                t'<text x="{x}" y="{y}" font-family="{family}" font-size="12" font-weight="{weight}" '
+                t'fill="#50586a" text-anchor="{anchor}">{s}</text>'
+            )
+        )
 
-    text(48, 78, "Bailey", 44, themes[first][INK], 800)
-    text(page - 48, 62, "Every file in this repo, built. Drawings live in parts/ and type/;", 13, "#50586a", anchor="end")
-    text(page - 48, 82, "everything else only places them. Generated by build.py: do not edit.", 13, "#50586a", anchor="end")
-    y = 120
     for folder, note in folders.items():
-        cells = []
-        for art in arts[folder]:
-            themed = any(fill == GROUND for fill, _ in flat[art.key])
-            cells += [(art, name) for name in (themes if themed else [first])]
-        out.append(f'<rect x="0" y="{y}" width="{page}" height="48" fill="{band}"/>')
-        text(40, y + 30, folder.upper(), 13, "#50586a", 700, spacing=' letter-spacing="1.6"')
-        text(page - 40, y + 30, note, 12, "#50586a", anchor="end")
+        cells = [(art, name) for art in arts[folder] for name in (themes if art.has_ground else [first])]
+        out.append(xml(t'<rect y="{y}" width="{page}" height="48" fill="#E9ECF3"/>'))
+        text(40, y + 30, folder.upper(), anchor="start", weight=700)
+        text(page - 40, y + 30, note, anchor="end")
         y += 48
         columns = math.ceil(len(cells) / math.ceil(len(cells) / 5))
-        cell_w = page / columns
-        for start in range(0, len(cells), columns):
-            row = cells[start:start + columns]
-            scales = [min((cell_w - 68) / art.width, row_art / art.height) for art, _ in row]
-            height = max(art.height * s for (art, _), s in zip(row, scales)) + 94
-            for i, ((art, name), s) in enumerate(zip(row, scales)):
-                x = i * cell_w
-                if i:
-                    out.append(f'<line x1="{num(x)}" y1="{num(y)}" x2="{num(x)}" y2="{num(y + height)}" stroke="{rule}"/>')
-                ax, ay = x + (cell_w - art.width * s) / 2, y + 30 + (height - 94 - art.height * s) / 2
-                out.append(f'<g transform="translate({num(ax)} {num(ay)}) scale({num(s, 5)})">{paths(art, flat[art.key], themes[name])}</g>')
-                themed = len([c for c in cells if c[0] is art]) > 1
-                text(x + 16, y + 22, name if themed else art.title.split(" · ")[0], 12, "#667085", 700)
-                text(x + cell_w / 2, y + height - 34, art.key, 12, themes[first][INK], 600, "middle", mono)
-                text(x + cell_w / 2, y + height - 16, " + ".join(art.links()) or "drawn here", 11.5, "#50586a", anchor="middle")
+        width = page / columns
+        for row in batched(cells, columns, strict=False):
+            scales = [min((width - 68) / art.width, tallest / art.height) for art, _ in row]
+            height = max(art.height * s for (art, _), s in zip(row, scales, strict=True)) + 94
+            for i, ((art, name), s) in enumerate(zip(row, scales, strict=True)):
+                middle = (i + 0.5) * width
+                dx, dy = middle - art.width * s / 2, y + 30 + (height - 94 - art.height * s) / 2
+                out.append(
+                    xml(t'<g transform="translate({dx} {dy}) scale({num(s, 5)})">{paths(art, themes[name]):raw}</g>')
+                )
+                text(
+                    middle,
+                    y + height - 34,
+                    f"{art.key} · {name}" if art.has_ground else art.key,
+                    weight=600,
+                    family=mono,
+                )
+                text(middle, y + height - 16, " + ".join(art.links()) or "drawn here")
             y += height
-            out.append(f'<line x1="0" y1="{num(y)}" x2="{page}" y2="{num(y)}" stroke="{rule}"/>')
-    body = "\n".join(out)
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {page} {num(y)}" width="{page}" height="{num(y)}">\n'
-            f'<title>Bailey: every file, built</title>\n<rect width="{page}" height="{num(y)}" fill="{paper}"/>\n{body}\n</svg>\n')
+    return xml(
+        t'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {page} {y}" width="{page}" height="{y}">'
+        t'<rect width="{page}" height="{y}" fill="#F5F7FB"/>{"".join(out):raw}</svg>\n'
+    )
 
 
-def main():
-    config = tomllib.loads((ROOT / "bailey.toml").read_text(encoding="utf-8"))
-    folders, themes, png_sizes = config["folders"], config["themes"], config.get("png", {})
-    arts = {folder: [load(p) for p in sorted((ROOT / folder).glob("*.svg"))] for folder in folders}
-    flat = {art.key: art.flatten() for group in arts.values() for art in group}
+def main() -> None:
+    config = tomllib.loads((ROOT / "bailey.toml").read_text())
+    folders, themes, sizes = config["folders"], config["themes"], config.get("png", {})
+    arts = {folder: [load(path) for path in sorted((ROOT / folder).glob("*.svg"))] for folder in folders}
 
     dist = ROOT / "dist"
-    shutil.rmtree(dist, ignore_errors=True)
-    written = 0
-    for name, theme in themes.items():
-        for folder, group in arts.items():
-            target = dist / name / folder
-            target.mkdir(parents=True, exist_ok=True)
-            for art in group:
-                svg = standalone(art, flat[art.key], theme)
-                (target / f"{art.path.stem}.svg").write_text(svg, encoding="utf-8")
-                written += 1
-                for size in png_sizes.get(folder, []):
-                    scale = size / max(art.width, art.height)
-                    png = resvg_py.svg_to_bytes(svg_string=svg, width=max(1, round(art.width * scale)),
-                                                height=max(1, round(art.height * scale)))
-                    (target / f"{art.path.stem}-{size}.png").write_bytes(bytes(png))
-                    written += 1
-    (dist / "sheet.svg").write_text(sheet(folders, arts, flat, themes), encoding="utf-8")
-    print(f"built {sum(len(g) for g in arts.values())} source files in {len(themes)} themes: {written + 1} files in dist/")
+    rmtree(dist, ignore_errors=True)
+    for (name, theme), (folder, group) in product(themes.items(), arts.items()):
+        (out := dist / name / folder).mkdir(parents=True)
+        for art in group:
+            (out / f"{art.path.stem}.svg").write_text(svg := standalone(art, theme))
+            for size in sizes.get(folder, []):
+                scale = size / max(art.width, art.height)
+                width, height = (max(1, round(side * scale)) for side in (art.width, art.height))
+                png = resvg_py.svg_to_bytes(svg_string=svg, width=width, height=height)
+                (out / f"{art.path.stem}-{size}.png").write_bytes(bytes(png))
+    (dist / "sheet.svg").write_text(sheet(folders, arts, themes))
+    print(f"built {sum(map(len, arts.values()))} files in {len(themes)} themes")
 
 
 if __name__ == "__main__":

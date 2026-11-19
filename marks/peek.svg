@@ -1,6 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" id="art" viewBox="0 0 2693.6 1259.03">
   <title>C1 · the peek: Bailey over a ledge</title>
-  <!-- The paw pads are cut out of what Bailey leans on, so the paws stay open. -->
   <mask id="paws" maskUnits="userSpaceOnUse" x="-64" y="-64" width="2821.6" height="1387.03">
     <rect x="-64" y="-64" width="2821.6" height="1387.03" fill="#fff"/>
     <use href="../parts/peek.svg#pads" x="187.28" y="0" width="2320.72" height="1259.03" color="#000"/>
